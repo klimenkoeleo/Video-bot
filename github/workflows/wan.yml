@@ -1,0 +1,68 @@
+name: WAN 2.2 via HF Space
+on:
+  workflow_dispatch: {}
+jobs:
+  gen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: pip install gradio_client requests
+      - name: Generate video
+        env:
+          HF_SPACE: "KingNish/wan2-2-fast"  # ← ваш slug
+          PROMPT: "A cinematic 5s clip of a corgi running on the beach at sunset"
+          SECONDS: "5"
+          API_NAME: "/predict"              # ← подставьте верное имя эндпоинта (см. ниже)
+          HF_TOKEN: ${{ secrets.HF_TOKEN }} # ← нужен только если Space требует авторизацию
+        run: |
+          python - <<'PY'
+          import os, sys, requests
+          from gradio_client import Client
+
+          space = os.getenv("HF_SPACE")
+          prompt = os.getenv("PROMPT")
+          seconds = int(os.getenv("SECONDS","5"))
+          api_name = os.getenv("API_NAME") or None
+          token = os.getenv("HF_TOKEN") or None
+
+          if not space:
+              print("HF_SPACE не задан", file=sys.stderr); sys.exit(1)
+
+          client = Client(space, hf_token=token)
+
+          # Сначала пробуем (prompt, seconds). Если у эндпоинта другой набор аргументов — пробуем только prompt.
+          try:
+              out = client.predict(prompt, seconds, api_name=api_name)
+          except TypeError:
+              out = client.predict(prompt, api_name=api_name)
+
+          def download(url, name):
+              r = requests.get(url, timeout=600); r.raise_for_status()
+              open(name, "wb").write(r.content)
+
+          saved = 0
+          if isinstance(out, list):
+              for i, v in enumerate(out):
+                  if isinstance(v, str) and v.startswith("http"):
+                      download(v, f"result_{i}.mp4"); saved += 1
+          elif isinstance(out, str) and out.startswith("http"):
+              download(out, "result.mp4"); saved = 1
+          elif isinstance(out, dict):
+              for k, v in out.items():
+                  if isinstance(v, str) and v.startswith("http"):
+                      download(v, f"result_{k}.mp4"); saved += 1
+
+          if saved == 0:
+              print("Не нашли ссылку на видео. Проверьте api_name и порядок аргументов (Use via API).", file=sys.stderr)
+              sys.exit(1)
+          PY
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wan-output
+          path: "*.mp4"
+          if-no-files-found: error
+
