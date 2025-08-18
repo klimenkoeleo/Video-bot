@@ -1,95 +1,76 @@
-name: Run Video Bot
-on:
-  workflow_dispatch:
+name: Run Video Bot on: workflow_dispatch:
+jobs: build: runs-on: ubuntu-latest steps:
+uses: actions/checkout@v4
+uses: actions/setup-python@v5 with: python-version: '3.11'
+name: Install deps run: | python -V pip install -U pip pip install -U gradio_client requests
+name: Run bot (WAN 2.2 HF Space) continue-on-error: true env: HF_SPACE: KingNish/wan2-2-fast API_NAME: /generate_video PROMPT: make this image come alive, cinematic motion IMAGE_URL: WIDTH: '896' HEIGHT: '896' SECONDS: '5' NEGATIVE_PROMPT: GUIDANCE_SCALE: '0' STEPS: '4' SEED: '42' RANDOMIZE_SEED: 'true' HF_TOKEN: ${{ secrets.HF_TOKEN }} run: | python - <<'PY' import os, json, shutil, pathlib, requests, traceback from gradio_client import Client, handle_file
+  def save_text(name, text):
+      try:
+          open(name, "w", encoding="utf-8").write(text)
+      except Exception:
+          pass
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install deps
-        run: pip install gradio_client requests
-      - name: Run bot (WAN 2.2 HF Space)
-        env:
-          HF_SPACE: KingNish/wan2-2-fast
-          API_NAME: /generate_video
-          PROMPT: make this image come alive, cinematic motion
-          IMAGE_URL:
-          WIDTH: '896'
-          HEIGHT: '896'
-          SECONDS: '5'
-          NEGATIVE_PROMPT:
-          GUIDANCE_SCALE: '0'
-          STEPS: '4'
-          SEED: '42'
-          RANDOMIZE_SEED: 'true'
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          python - <<'PY'
-          import os, json, shutil, pathlib, requests
-          from gradio_client import Client, handle_file
+  try:
+      print("Config:", {
+          "HF_SPACE": os.getenv("HF_SPACE"),
+          "API_NAME": os.getenv("API_NAME"),
+          "HAS_TOKEN": bool(os.getenv("HF_TOKEN")),
+      })
 
-          client = Client(os.getenv("HF_SPACE"), hf_token=os.getenv("HF_TOKEN") or None)
+      client = Client(os.getenv("HF_SPACE"), hf_token=os.getenv("HF_TOKEN") or None)
 
-          kwargs = {
-            "input_image": handle_file(os.getenv("IMAGE_URL")) if os.getenv("IMAGE_URL") else None,
-            "prompt": os.getenv("PROMPT"),
-            "height": int(os.getenv("HEIGHT","896")),
-            "width": int(os.getenv("WIDTH","896")),
-            "negative_prompt": os.getenv("NEGATIVE_PROMPT") or None,
-            "duration_seconds": float(os.getenv("SECONDS","5")),
-            "guidance_scale": float(os.getenv("GUIDANCE_SCALE","0")),
-            "steps": int(os.getenv("STEPS","4")),
-            "seed": int(os.getenv("SEED","42")),
-            "randomize_seed": os.getenv("RANDOMIZE_SEED","true").lower()=="true",
-          }
+      kwargs = {
+        "input_image": handle_file(os.getenv("IMAGE_URL")) if os.getenv("IMAGE_URL") else None,
+        "prompt": os.getenv("PROMPT"),
+        "height": int(os.getenv("HEIGHT","896")),
+        "width": int(os.getenv("WIDTH","896")),
+        "negative_prompt": os.getenv("NEGATIVE_PROMPT") or None,
+        "duration_seconds": float(os.getenv("SECONDS","5")),
+        "guidance_scale": float(os.getenv("GUIDANCE_SCALE","0")),
+        "steps": int(os.getenv("STEPS","4")),
+        "seed": int(os.getenv("SEED","42")),
+        "randomize_seed": os.getenv("RANDOMIZE_SEED","true").lower()=="true",
+      }
 
-          out = client.predict(api_name=os.getenv("API_NAME"), **kwargs)
-          print("RAW response:", repr(out))
-          open("response.json","w", encoding="utf-8").write(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+      out = client.predict(api_name=os.getenv("API_NAME"), **kwargs)
+      print("RAW response:", repr(out))
+      save_text("response.json", json.dumps(out, ensure_ascii=False, indent=2, default=str))
 
-          exts = [".mp4", ".webm", ".gif", ".mov", ".m4v"]
-          saved = 0
+      exts = [".mp4", ".webm", ".gif", ".mov", ".m4v"]
+      saved = [0]  # вместо nonlocal/global
 
-          def download(url, name):
-              r = requests.get(url, timeout=600); r.raise_for_status()
-              open(name, "wb").write(r.content)
+      def download(url, name):
+          r = requests.get(url, timeout=600); r.raise_for_status()
+          open(name, "wb").write(r.content)
 
-          def try_save(obj, prefix="result"):
-              nonlocal saved
-              if obj is None:
-                  return
-              if isinstance(obj, str):
-                  if obj.startswith("http"):
-                      download(obj, f"{prefix}_{saved}.mp4"); saved += 1
-                  else:
-                      p = pathlib.Path(obj)
-                      if p.exists():
-                          ext = p.suffix if p.suffix else ".mp4"
-                          if ext.lower() not in exts: ext = ".mp4"
-                          shutil.copyfile(p, f"{prefix}_{saved}{ext}"); saved += 1
-              elif isinstance(obj, dict):
-                  for v in obj.values():
-                      try_save(v, prefix)
-              elif isinstance(obj, (list, tuple, set)):
-                  for v in obj:
-                      try_save(v, prefix)
+      def try_save(obj, prefix="result"):
+          if obj is None:
+              return
+          if isinstance(obj, str):
+              if obj.startswith("http"):
+                  download(obj, f"{prefix}_{saved[0]}.mp4"); saved[0] += 1
+              else:
+                  p = pathlib.Path(obj)
+                  if p.exists():
+                      ext = p.suffix if p.suffix else ".mp4"
+                      if ext.lower() not in exts: ext = ".mp4"
+                      shutil.copyfile(p, f"{prefix}_{saved[0]}{ext}"); saved[0] += 1
+          elif isinstance(obj, dict):
+              for v in obj.values():
+                  try_save(v, prefix)
+          elif isinstance(obj, (list, tuple, set)):
+              for v in obj:
+                  try_save(v, prefix)
 
-          try_save(out)
-          print(f"Saved files: {saved}")
-          PY
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wan-output
-          path: |
-            *.mp4
-            *.webm
-            *.gif
-            response.json
-          if-no-files-found: warn
+      try_save(out)
+      print(f"Saved files: {saved[0]}")
+  except Exception:
+      tb = traceback.format_exc()
+      print("ERROR:\n", tb)
+      save_text("error.txt", tb)
+  PY
+name: Upload artifact uses: actions/upload-artifact@v4 with: name: wan-output path: | .mp4 .webm *.gif response.json error.txt if-no-files-found: warn
+
+    
 
 
