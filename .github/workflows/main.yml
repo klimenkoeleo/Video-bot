@@ -3,10 +3,20 @@ name: Run Video Bot
 on:
   workflow_dispatch:   # это даёт кнопку "Run workflow"
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
+- name: Run bot
+  env:
+    SPACE: "KingNish/wan2-2-fast"
+    PROMPT: "A cute corgi running on the beach at sunset"
+    API_NAME: "/generate_video"
+    SECONDS: "5"
+    HF_TOKEN: ${{ secrets.HF_TOKEN }}   # если Space требует токен
+  run: |
+    python hf_space_client.py 
+      --space "$SPACE" 
+      --prompt "$PROMPT" 
+      --seconds "$SECONDS" 
+      --api-name "$API_NAME"
+
       - name: Checkout repo
         uses: actions/checkout@v3
 
