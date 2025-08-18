@@ -1,27 +1,19 @@
-name: Run Video Bot on: workflow_dispatch:
-jobs: build: runs-on: ubuntu-latest steps:
+name: Run bot (WAN 2.2 HF Space) on: workflow_dispatch:
+env: HF_SPACE: KingNish/wan2-2-fast API_NAME: /generate_video PROMPT: make this image come alive, cinematic motion IMAGE_URL: "" WIDTH: '896' HEIGHT: '896' SECONDS: '5' NEGATIVE_PROMPT: "" GUIDANCE_SCALE: '0' STEPS: '4' SEED: '42' RANDOMIZE_SEED: 'true'
+jobs: run-wan: runs-on: ubuntu-latest steps:
 uses: actions/checkout@v4
 uses: actions/setup-python@v5 with: python-version: '3.11'
 name: Install deps run: | python -V pip install -U pip pip install -U gradio_client requests
-name: Run bot (WAN 2.2 HF Space) continue-on-error: true env: HF_SPACE: KingNish/wan2-2-fast API_NAME: /generate_video PROMPT: make this image come alive, cinematic motion IMAGE_URL: WIDTH: '896' HEIGHT: '896' SECONDS: '5' NEGATIVE_PROMPT: GUIDANCE_SCALE: '0' STEPS: '4' SEED: '42' RANDOMIZE_SEED: 'true' HF_TOKEN: ${{ secrets.HF_TOKEN }} run: | python - <<'PY' import os, json, shutil, pathlib, requests, traceback from gradio_client import Client, handle_file
-  def save_text(name, text):
-      try:
-          open(name, "w", encoding="utf-8").write(text)
-      except Exception:
-          pass
+name: Run bot env: HF_TOKEN: ${{ secrets.HF_TOKEN }} run: | python - <<'PY' import os, json, shutil, pathlib, requests, traceback from gradio_client import Client, handle_file
+  def save(name, text):
+      try: open(name, "w", encoding="utf-8").write(text)
+      except: pass
 
   try:
-      print("Config:", {
-          "HF_SPACE": os.getenv("HF_SPACE"),
-          "API_NAME": os.getenv("API_NAME"),
-          "HAS_TOKEN": bool(os.getenv("HF_TOKEN")),
-      })
-
       client = Client(os.getenv("HF_SPACE"), hf_token=os.getenv("HF_TOKEN") or None)
-
       kwargs = {
         "input_image": handle_file(os.getenv("IMAGE_URL")) if os.getenv("IMAGE_URL") else None,
-        "prompt": os.getenv("PROMPT"),
+        "prompt": os.getenv("PROMPT") or "",
         "height": int(os.getenv("HEIGHT","896")),
         "width": int(os.getenv("WIDTH","896")),
         "negative_prompt": os.getenv("NEGATIVE_PROMPT") or None,
@@ -31,45 +23,41 @@ name: Run bot (WAN 2.2 HF Space) continue-on-error: true env: HF_SPACE: KingNish
         "seed": int(os.getenv("SEED","42")),
         "randomize_seed": os.getenv("RANDOMIZE_SEED","true").lower()=="true",
       }
-
       out = client.predict(api_name=os.getenv("API_NAME"), **kwargs)
       print("RAW response:", repr(out))
-      save_text("response.json", json.dumps(out, ensure_ascii=False, indent=2, default=str))
+      save("response.json", json.dumps(out, ensure_ascii=False, indent=2, default=str))
 
-      exts = [".mp4", ".webm", ".gif", ".mov", ".m4v"]
-      saved = [0]  # вместо nonlocal/global
-
-      def download(url, name):
+      exts = {".mp4",".webm",".gif",".mov",".m4v"}
+      n = 0
+      def dl(url, name):
           r = requests.get(url, timeout=600); r.raise_for_status()
           open(name, "wb").write(r.content)
-
-      def try_save(obj, prefix="result"):
-          if obj is None:
-              return
+      def save_any(obj, prefix="result"):
+          nonlocal n
+          if obj is None: return
           if isinstance(obj, str):
               if obj.startswith("http"):
-                  download(obj, f"{prefix}_{saved[0]}.mp4"); saved[0] += 1
+                  dl(obj, f"{prefix}_{n}.mp4"); n += 1
               else:
                   p = pathlib.Path(obj)
                   if p.exists():
-                      ext = p.suffix if p.suffix else ".mp4"
-                      if ext.lower() not in exts: ext = ".mp4"
-                      shutil.copyfile(p, f"{prefix}_{saved[0]}{ext}"); saved[0] += 1
+                      ext = p.suffix.lower() if p.suffix else ".mp4"
+                      if ext not in exts: ext = ".mp4"
+                      shutil.copyfile(p, f"{prefix}_{n}{ext}"); n += 1
           elif isinstance(obj, dict):
-              for v in obj.values():
-                  try_save(v, prefix)
+              for v in obj.values(): save_any(v, prefix)
           elif isinstance(obj, (list, tuple, set)):
-              for v in obj:
-                  try_save(v, prefix)
-
-      try_save(out)
-      print(f"Saved files: {saved[0]}")
+              for v in obj: save_any(v, prefix)
+      save_any(out)
+      print("Saved files:", n)
   except Exception:
+      import traceback
       tb = traceback.format_exc()
       print("ERROR:\n", tb)
-      save_text("error.txt", tb)
+      save("error.txt", tb)
   PY
-name: Upload artifact uses: actions/upload-artifact@v4 with: name: wan-output path: | .mp4 .webm *.gif response.json error.txt if-no-files-found: warn
+name: Upload artifact if: always() uses: actions/upload-artifact@v4 with: name: wan-output path: | .mp4 .webm *.gif response.json error.txt if-no-files-found: warn
+
 
     
 
