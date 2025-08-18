@@ -1,6 +1,20 @@
-name: Run WAN Video Bot on: workflow_dispatch:
-env: HF_SPACE: KingNish/wan2-2-fast API_NAME: /generate_video PROMPT: make this image come alive, cinematic motion IMAGE_URL: "" WIDTH: '896' HEIGHT: '896' SECONDS: '5' NEGATIVE_PROMPT: "" GUIDANCE_SCALE: '0' STEPS: '4' SEED: '42' RANDOMIZE_SEED: 'true'
-jobs: run-wan: runs-on: ubuntu-latest steps:
+name: Run WAN Video Bot 
+on:
+workflow_dispatch: 
+jobs:
+env: HF_SPACE:"KingNish/wan2-2-fast"
+API_NAME: /generate_video 
+PROMPT: make this image come alive, cinematic motion 
+IMAGE_URL: "" 
+WIDTH: '896' 
+HEIGHT: '896' 
+SECONDS: '5' 
+NEGATIVE_PROMPT: "" 
+GUIDANCE_SCALE: '0' 
+STEPS: '4' 
+SEED: '42' 
+RANDOMIZE_SEED: 'true'f
+run-wan: runs-on: ubuntu-latest steps:
 uses: actions/checkout@v4
 uses: actions/setup-python@v5 with: python-version: '3.11'
 name: Install deps run: | python -V pip install -U pip pip install -U gradio_client requests
