@@ -29,9 +29,11 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python - <<'PY'
-          import os, requests
+          import os, json, shutil, pathlib, requests
           from gradio_client import Client, handle_file
+
           client = Client(os.getenv("HF_SPACE"), hf_token=os.getenv("HF_TOKEN") or None)
+
           kwargs = {
             "input_image": handle_file(os.getenv("IMAGE_URL")) if os.getenv("IMAGE_URL") else None,
             "prompt": os.getenv("PROMPT"),
@@ -44,31 +46,50 @@ jobs:
             "seed": int(os.getenv("SEED","42")),
             "randomize_seed": os.getenv("RANDOMIZE_SEED","true").lower()=="true",
           }
+
           out = client.predict(api_name=os.getenv("API_NAME"), **kwargs)
+          print("RAW response:", repr(out))
+          open("response.json","w", encoding="utf-8").write(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+          exts = [".mp4", ".webm", ".gif", ".mov", ".m4v"]
+          saved = 0
+
           def download(url, name):
               r = requests.get(url, timeout=600); r.raise_for_status()
               open(name, "wb").write(r.content)
-          saved = 0
-          if isinstance(out, list):
-              for i, v in enumerate(out):
-                  if isinstance(v, str) and v.startswith("http"):
-                      download(v, f"result_{i}.mp4"); saved += 1
-                  elif isinstance(v, dict):
-                      for k, val in v.items():
-                          if isinstance(val, str) and val.startswith("http"):
-                              download(val, f"result_{i}_{k}.mp4"); saved += 1
-          elif isinstance(out, str) and out.startswith("http"):
-              download(out, "result.mp4"); saved = 1
-          elif isinstance(out, dict):
-              for k, v in out.items():
-                  if isinstance(v, str) and v.startswith("http"):
-                      download(v, f"result_{k}.mp4"); saved += 1
+
+          def try_save(obj, prefix="result"):
+              nonlocal saved
+              if obj is None:
+                  return
+              if isinstance(obj, str):
+                  if obj.startswith("http"):
+                      download(obj, f"{prefix}_{saved}.mp4"); saved += 1
+                  else:
+                      p = pathlib.Path(obj)
+                      if p.exists():
+                          ext = p.suffix if p.suffix else ".mp4"
+                          if ext.lower() not in exts: ext = ".mp4"
+                          shutil.copyfile(p, f"{prefix}_{saved}{ext}"); saved += 1
+              elif isinstance(obj, dict):
+                  for v in obj.values():
+                      try_save(v, prefix)
+              elif isinstance(obj, (list, tuple, set)):
+                  for v in obj:
+                      try_save(v, prefix)
+
+          try_save(out)
           print(f"Saved files: {saved}")
           PY
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: wan-output
-          path: "*.mp4"
-          if-no-files-found: error
+          path: |
+            *.mp4
+            *.webm
+            *.gif
+            response.json
+          if-no-files-found: warn
+
 
