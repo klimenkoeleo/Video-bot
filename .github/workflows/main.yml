@@ -1,32 +1,74 @@
 name: Run Video Bot
-
 on:
-  workflow_dispatch:   # это даёт кнопку "Run workflow"
+  workflow_dispatch:
 
-- name: Run bot
-  env:
-    SPACE: "KingNish/wan2-2-fast"
-    PROMPT: "A cute corgi running on the beach at sunset"
-    API_NAME: "/generate_video"
-    SECONDS: "5"
-    HF_TOKEN: ${{ secrets.HF_TOKEN }}   # если Space требует токен
-  run: |
-    python hf_space_client.py 
-      --space "$SPACE" 
-      --prompt "$PROMPT" 
-      --seconds "$SECONDS" 
-      --api-name "$API_NAME"
-
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
+      - name: Install deps
+        run: pip install gradio_client requests
+      - name: Run bot (WAN 2.2 HF Space)
+        env:
+          HF_SPACE: KingNish/wan2-2-fast
+          API_NAME: /generate_video
+          PROMPT: make this image come alive, cinematic motion
+          IMAGE_URL:
+          WIDTH: '896'
+          HEIGHT: '896'
+          SECONDS: '5'
+          NEGATIVE_PROMPT:
+          GUIDANCE_SCALE: '0'
+          STEPS: '4'
+          SEED: '42'
+          RANDOMIZE_SEED: 'true'
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os, requests
+          from gradio_client import Client, handle_file
+          client = Client(os.getenv("HF_SPACE"), hf_token=os.getenv("HF_TOKEN") or None)
+          kwargs = {
+            "input_image": handle_file(os.getenv("IMAGE_URL")) if os.getenv("IMAGE_URL") else None,
+            "prompt": os.getenv("PROMPT"),
+            "height": int(os.getenv("HEIGHT","896")),
+            "width": int(os.getenv("WIDTH","896")),
+            "negative_prompt": os.getenv("NEGATIVE_PROMPT") or None,
+            "duration_seconds": float(os.getenv("SECONDS","5")),
+            "guidance_scale": float(os.getenv("GUIDANCE_SCALE","0")),
+            "steps": int(os.getenv("STEPS","4")),
+            "seed": int(os.getenv("SEED","42")),
+            "randomize_seed": os.getenv("RANDOMIZE_SEED","true").lower()=="true",
+          }
+          out = client.predict(api_name=os.getenv("API_NAME"), **kwargs)
+          def download(url, name):
+              r = requests.get(url, timeout=600); r.raise_for_status()
+              open(name, "wb").write(r.content)
+          saved = 0
+          if isinstance(out, list):
+              for i, v in enumerate(out):
+                  if isinstance(v, str) and v.startswith("http"):
+                      download(v, f"result_{i}.mp4"); saved += 1
+                  elif isinstance(v, dict):
+                      for k, val in v.items():
+                          if isinstance(val, str) and val.startswith("http"):
+                              download(val, f"result_{i}_{k}.mp4"); saved += 1
+          elif isinstance(out, str) and out.startswith("http"):
+              download(out, "result.mp4"); saved = 1
+          elif isinstance(out, dict):
+              for k, v in out.items():
+                  if isinstance(v, str) and v.startswith("http"):
+                      download(v, f"result_{k}.mp4"); saved += 1
+          print(f"Saved files: {saved}")
+          PY
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wan-output
+          path: "*.mp4"
+          if-no-files-found: error
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run bot
-        run: python hf_space_client.py
